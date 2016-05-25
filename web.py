@@ -84,10 +84,12 @@ async def resolve_host_config(hostname):
     if not host_config:
 
         sql = """SELECT path
-                 FROM builder_build b, builder_environment e
+                 FROM builder_build b
+                 JOIN builder_deploy d ON b.id = d.build_id
+                 JOIN builder_environment e ON e.id = d.environment_id
                  WHERE e.url = %s AND b.status='SUC'
-                 ORDER BY b.created DESC
-                 LIMIT 1"""
+                 ORDER BY d.deployed
+                 DESC LIMIT 1"""
 
         pool = await pg_pool()
         async with pool.acquire() as conn:

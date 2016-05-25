@@ -13,28 +13,48 @@ from decouple import config
 from util import filter_headers, generate_dsn
 
 
+#
+# configuration and settings
+#
+
 AWS_KEY = config('AWS_ACCESS_KEY')
 AWS_SECRET = config('AWS_SECRET_KEY')
 AWS_BUCKET = config('AWS_BUCKET')
 
 POSTGRESQL_DSN = generate_dsn(config('DATABASE_URL'))
 
+HOST_CACHE_TTL = config('HOST_CACHE_TTL', cast=int, default=120)
+HOST_CACHE_SIZE = config('HOST_CACHE_SIZE', cast=int, default=128)
+
 PROXY_REQUEST_HEADERS = ('Cache-Control', 'If-Modified-Since', 'If-None-Match')
 PROXY_RESPONSE_HEADERS = ('Content-Length', 'Last-Modified', 'ETag')
 
-HOST_TTL = config('HOST_TTL', cast=int, default=120)
+A_YEAR = 60 * 60 * 24 * 365
 
 CACHE_MAX_AGES = {
+    'application/javascript': A_YEAR,
+    'audio/mpeg': A_YEAR,
+    'audio/webm': A_YEAR,
+    'image/gif': A_YEAR,
+    'image/jpeg': A_YEAR,
+    'image/pjpeg': A_YEAR,
+    'image/png': A_YEAR,
+    'text/css': A_YEAR,
     'text/html': 60 * 5,  # 5 minutes
-    'text/css': 60 * 60 * 24 * 365,  # 1 year
+    'video/mp4': A_YEAR,
+    'video/webm': A_YEAR,
 }
 
+
+#
+# set up services and other global things
+#
 
 # set up logger
 logger = logging.getLogger('franklin.server')
 
 # set up expiring host cache
-host_cache = TTLCache(maxsize=128, ttl=HOST_TTL)
+host_cache = TTLCache(maxsize=HOST_CACHE_SIZE, ttl=HOST_CACHE_TTL)
 
 # set up aiohttp client
 session = aiohttp.ClientSession()
@@ -48,11 +68,20 @@ async def pg_pool():
     return _pg_pool
 
 
+#
+# the code that does stuff
+#
+
 async def resolve_host_config(hostname):
+    """ Query Franklin API by hostname for project configuration.
 
-    if hostname not in host_cache:
+        Responses are cached for HOST_CACHE_TTL seconds, retaining at most
+        HOST_CACHE_SIZE cache entries.
+    """
 
-        result = None
+    host_config = host_cache.get(hostname)
+
+    if not host_config:
 
         sql = """SELECT path
                  FROM builder_build b, builder_environment e
@@ -64,15 +93,17 @@ async def resolve_host_config(hostname):
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql, (hostname,))
-                async for row in cur:
-                    result = dict(zip(('path',), row))
+                row = await cur.fetchone()
+                host_config = dict(zip(('path',), row))
+                host_cache[hostname] = host_config
 
-        host_cache[hostname] = result
-
-    return host_cache.get(hostname)
+    return host_config
 
 
 async def generate_signature(bucket, path, amz_date, method='GET'):
+    """ Generate the signature used to sign calls to S3,
+        allowing for access to objects with private ACL.
+    """
 
     params = {
         'method': method,
@@ -93,6 +124,12 @@ async def generate_signature(bucket, path, amz_date, method='GET'):
 
 
 async def fetch_s3(bucket, path, method='GET', headers=None, signed=True):
+    """ Fetch an object from S3, signing the request if signed=True.
+        Any headers passed to fetch_s3 will be included in the request to S3.
+
+        A dict representing the object is returned that includes the HTTP
+        response status code, headers, and body.
+    """
 
     headers = headers.copy() if headers else {}
 
@@ -108,16 +145,19 @@ async def fetch_s3(bucket, path, method='GET', headers=None, signed=True):
         })
 
     async with aiohttp.request(method, url, headers=headers) as response:
-
-        resource = {}
-        resource['status'] = response.status
-        resource['headers'] = response.headers
-        resource['data'] = await response.read()
+        resource = {
+            'status': response.status,
+            'headers': response.headers,
+            'data': await response.read(),
+        }
 
     return resource
 
 
 async def request_handler(request):
+    """ Handle all requests and return the response,
+        either the proxied object or an appropriate error.
+    """
 
     hostname = request.headers.get('Host')
     host_config = await resolve_host_config(hostname)
@@ -155,6 +195,10 @@ async def request_handler(request):
                         content_type=resource['headers']['Content-Type'],
                         headers=response_headers)
 
+
+#
+# make the web app and set up route
+#
 
 app = web.Application()
 app.router.add_route('GET', r'/{resource_path:.*?}', request_handler)

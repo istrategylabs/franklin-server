@@ -20,6 +20,7 @@ from util import filter_headers, generate_dsn
 AWS_KEY = config('AWS_ACCESS_KEY')
 AWS_SECRET = config('AWS_SECRET_KEY')
 AWS_BUCKET = config('AWS_BUCKET')
+API_URL = config('FRANKLIN_API_URL')
 
 POSTGRESQL_DSN = generate_dsn(config('DATABASE_URL'))
 
@@ -82,24 +83,12 @@ async def resolve_host_config(hostname):
     host_config = host_cache.get(hostname)
 
     if not host_config:
+        url = API_URL + '?domain=' + hostname
+        async with aiohttp.request('GET', url, headers={}) as response:
+            print(await response.read())
+            print(await response.text())
 
-        sql = """SELECT path
-                 FROM builder_build b
-                 JOIN builder_deploy d ON b.id = d.build_id
-                 JOIN builder_environment e ON e.id = d.environment_id
-                 WHERE e.url = %s AND b.status='SUC'
-                 ORDER BY d.deployed
-                 DESC LIMIT 1"""
-
-        pool = await pg_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(sql, (hostname,))
-                row = await cur.fetchone()
-                host_config = dict(zip(('path',), row))
-                host_cache[hostname] = host_config
-
-    return host_config
+    return ''
 
 
 async def generate_signature(bucket, path, amz_date, method='GET'):

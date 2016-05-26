@@ -25,19 +25,7 @@ The following environment variables are **required**:
 | AWS_KEY | AWS access key |
 | AWS_SECRET | AWS secret key |
 | AWS_BUCKET | The bucket containing Franklin deployments |
-| DATABASE_URL | 12factor-style resource URL to Franklin API database |
-
-*DATABASE_URL* should use the following format:
-
-```
-postgres://<user>:<password>@<host>:<port>/<dbname>
-```
-
-The database URL also takes an optional query string argument, *sslca*, that enables SSL on the connection and sets the path to the root certification, required by Amazon RDS.
-
-```
-postgres://<user>:<password>@<host>:<port>/<dbname>?sslca=<path>
-```
+| FRANKLIN_API_URL | URL to Franklin API domain lookup endpoint |
 
 
 The following environment variables are **optional**:

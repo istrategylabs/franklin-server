@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import hmac
 import logging
@@ -5,6 +6,7 @@ from base64 import b64encode
 from urllib.parse import quote, urljoin
 
 import aiohttp
+import uvloop
 from aiohttp import web
 from cachetools import TTLCache
 from decouple import config
@@ -47,6 +49,9 @@ CACHE_MAX_AGES = {
     'video/mp4': A_YEAR,
     'video/webm': A_YEAR,
 }
+
+
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 #

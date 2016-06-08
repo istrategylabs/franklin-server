@@ -12,6 +12,9 @@ from decouple import config
 from util import filter_headers
 
 
+__version__ = '1.0.0'
+
+
 #
 # configuration and settings
 #
@@ -76,8 +79,11 @@ async def resolve_host_config(hostname):
         config = {}
 
         url = urljoin(FRANKLIN_API_URL, '/v1/domains/')
-        params = {'domain': hostname, 'key': FRANKLIN_API_KEY}
-        headers = {'User-Agent': 'franklin-server'}
+        params = {'domain': hostname}
+        headers = {
+            'Authorization': 'Token {}'.format(FRANKLIN_API_KEY),
+            'User-Agent': 'franklin-server/{}'.format(__version__),
+        }
 
         async with session.get(url, params=params, headers=headers) as resp:
             if resp.status == 200:

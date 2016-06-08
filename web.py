@@ -1,9 +1,11 @@
 import datetime
 import hmac
 import logging
+import os
 from base64 import b64encode
 from urllib.parse import quote, urljoin
 
+import aiofiles
 import aiohttp
 from aiohttp import web
 from cachetools import TTLCache
@@ -149,6 +151,40 @@ async def fetch_s3(bucket, path, method='GET', headers=None, signed=True):
     return resource
 
 
+async def handle_404(host_config):
+    """ Try to fetch a custom 404 page from S3. If the page exists, return it
+        as expected. If it does not exist, return a default 404 page instead.
+        The presence or lack of a custom 404 will be saved on the host_config
+        and stored until it is evicted from the cache, but the custom file
+        itself is not yet cached.
+    """
+
+    try_custom_404 = host_config.get('custom_404', True)
+
+    if try_custom_404:
+
+        path = '{}/404.html'.format(host_config['path'])
+        resource = await fetch_s3(AWS_BUCKET, path)
+
+        has_custom_404 = resource['status'] == 200
+        host_config['custom_404'] = has_custom_404
+
+        if has_custom_404:
+            return web.Response(body=resource['data'],
+                                content_type='text/html',
+                                status=404)
+
+    # render default 404
+
+    path = os.path.join(os.path.dirname(__file__), 'templates', '404.html')
+    async with aiofiles.open(path) as fp:
+        content = await fp.read()
+
+    return web.Response(body=content,
+                        content_type='text/html',
+                        status=404)
+
+
 async def request_handler(request):
     """ Handle all requests and return the response,
         either the proxied object or an appropriate error.
@@ -175,9 +211,8 @@ async def request_handler(request):
         return web.Response(status=304)
 
     if resource['status'] != 200:
-        return web.Response(body=resource['data'],
-                            content_type='text/html',
-                            status=404)
+        resp = await handle_404(host_config)
+        return resp
 
     response_headers = filter_headers(
         resource['headers'], PROXY_RESPONSE_HEADERS)

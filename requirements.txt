@@ -1,4 +1,5 @@
-aiohttp==0.21.6
+aiofiles>=0.3,<0.4
+aiohttp>=0.21,<0.22
 cachetools==1.1.6
 chardet==2.3.0
 gunicorn==19.5.0

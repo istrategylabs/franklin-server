@@ -1,3 +1,0 @@
-#!/bin/bash
-
-mkdir ./config && curl http://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem > ./config/amazon-rds-ca-cert.pem

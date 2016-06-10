@@ -2,15 +2,17 @@ import datetime
 import hmac
 import logging
 from base64 import b64encode
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 import aiohttp
-import aiopg
 from aiohttp import web
 from cachetools import TTLCache
 from decouple import config
 
-from util import filter_headers, generate_dsn
+from util import filter_headers
+
+
+__version__ = '1.0.0'
 
 
 #
@@ -21,7 +23,8 @@ AWS_KEY = config('AWS_ACCESS_KEY')
 AWS_SECRET = config('AWS_SECRET_KEY')
 AWS_BUCKET = config('AWS_BUCKET')
 
-POSTGRESQL_DSN = generate_dsn(config('DATABASE_URL'))
+FRANKLIN_API_URL = config('FRANKLIN_API_URL')
+FRANKLIN_API_KEY = config('FRANKLIN_API_KEY')
 
 HOST_CACHE_TTL = config('HOST_CACHE_TTL', cast=int, default=120)
 HOST_CACHE_SIZE = config('HOST_CACHE_SIZE', cast=int, default=128)
@@ -59,14 +62,6 @@ host_cache = TTLCache(maxsize=HOST_CACHE_SIZE, ttl=HOST_CACHE_TTL)
 # set up aiohttp client
 session = aiohttp.ClientSession()
 
-# set up postgres
-_pg_pool = None
-async def pg_pool():
-    global _pg_pool
-    if not _pg_pool:
-        _pg_pool = await aiopg.create_pool(POSTGRESQL_DSN)
-    return _pg_pool
-
 
 #
 # the code that does stuff
@@ -79,27 +74,25 @@ async def resolve_host_config(hostname):
         HOST_CACHE_SIZE cache entries.
     """
 
-    host_config = host_cache.get(hostname)
+    if hostname not in host_cache:
 
-    if not host_config:
+        config = {}
 
-        sql = """SELECT path
-                 FROM builder_build b
-                 JOIN builder_deploy d ON b.id = d.build_id
-                 JOIN builder_environment e ON e.id = d.environment_id
-                 WHERE e.url = %s AND b.status='SUC'
-                 ORDER BY d.deployed
-                 DESC LIMIT 1"""
+        url = urljoin(FRANKLIN_API_URL, '/v1/domains/')
+        params = {'domain': hostname}
+        headers = {
+            'Authorization': 'Token {}'.format(FRANKLIN_API_KEY),
+            'User-Agent': 'franklin-server/{}'.format(__version__),
+        }
 
-        pool = await pg_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(sql, (hostname,))
-                row = await cur.fetchone()
-                host_config = dict(zip(('path',), row))
-                host_cache[hostname] = host_config
+        async with session.get(url, params=params, headers=headers) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                config.update(data)
 
-    return host_config
+        host_cache[hostname] = config
+
+    return host_cache.get(hostname)
 
 
 async def generate_signature(bucket, path, amz_date, method='GET'):
@@ -146,7 +139,7 @@ async def fetch_s3(bucket, path, method='GET', headers=None, signed=True):
             'x-amz-date': now,
         })
 
-    async with aiohttp.request(method, url, headers=headers) as response:
+    async with session.request(method, url, headers=headers) as response:
         resource = {
             'status': response.status,
             'headers': response.headers,

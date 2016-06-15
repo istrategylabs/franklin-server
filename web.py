@@ -11,7 +11,7 @@ from aiohttp import web
 from cachetools import TTLCache
 from decouple import config
 
-from util import filter_headers
+from util import CACHE_MAX_AGES, filter_headers
 
 
 __version__ = '2.0.0'
@@ -35,22 +35,6 @@ PROXY_REQUEST_HEADERS = ('Cache-Control', 'If-Modified-Since', 'If-None-Match')
 PROXY_RESPONSE_HEADERS = ('Content-Length', 'Last-Modified', 'ETag')
 DEFAULT_RESPONSE_HEADERS = {
     'Server': 'franklin-server/{}'.format(__version__),
-}
-
-A_YEAR = 60 * 60 * 24 * 365
-
-CACHE_MAX_AGES = {
-    'application/javascript': A_YEAR,
-    'audio/mpeg': A_YEAR,
-    'audio/webm': A_YEAR,
-    'image/gif': A_YEAR,
-    'image/jpeg': A_YEAR,
-    'image/pjpeg': A_YEAR,
-    'image/png': A_YEAR,
-    'text/css': A_YEAR,
-    'text/html': 60 * 5,  # 5 minutes
-    'video/mp4': A_YEAR,
-    'video/webm': A_YEAR,
 }
 
 

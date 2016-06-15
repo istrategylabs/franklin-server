@@ -54,10 +54,11 @@ On the response, franklin-server will forward the following headers from S3 to t
 
 franklin-server adds a *Cache-Control* header to the response based on the content type of the object. HTML responses will have *max-age* set to **five minutes**. The following content types will have *max-age* set to **one year**:
 
-* CSS, JavaScript
+* CSS, JavaScript, XML, Atom, RSS, manifest
 * MP4, WebM
 * MP3, audio-only WebM
-* JPEG, PJPEG, PNG, GIF
+* JPEG, PJPEG, PNG, GIF, SVG, SVGZ, ICO
+* TTF, TTC, OTF, EOT, WOFF, WOFF2
 
 All other responses will have `Cache-Control: no-cache`.
 

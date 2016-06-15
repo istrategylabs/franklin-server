@@ -14,7 +14,7 @@ from decouple import config
 from util import filter_headers
 
 
-__version__ = '1.0.0'
+__version__ = '2.0.0'
 
 
 #
@@ -33,6 +33,9 @@ HOST_CACHE_SIZE = config('HOST_CACHE_SIZE', cast=int, default=128)
 
 PROXY_REQUEST_HEADERS = ('Cache-Control', 'If-Modified-Since', 'If-None-Match')
 PROXY_RESPONSE_HEADERS = ('Content-Length', 'Last-Modified', 'ETag')
+DEFAULT_RESPONSE_HEADERS = {
+    'Server': 'franklin-server/{}'.format(__version__),
+}
 
 A_YEAR = 60 * 60 * 24 * 365
 
@@ -172,16 +175,20 @@ async def handle_404(host_config):
         if has_custom_404:
             return web.Response(body=resource['data'],
                                 content_type='text/html',
+                                headers=DEFAULT_RESPONSE_HEADERS,
                                 status=404)
 
     # render default 404
 
-    path = os.path.join(os.path.dirname(__file__), 'templates', '404.html')
+    path = os.path.join(os.path.dirname(__file__),
+                        'templates',
+                        '404-file_not_found.html')
     async with aiofiles.open(path) as fp:
         content = await fp.read()
 
-    return web.Response(body=content,
+    return web.Response(text=content,
                         content_type='text/html',
+                        headers=DEFAULT_RESPONSE_HEADERS,
                         status=404)
 
 
@@ -194,8 +201,16 @@ async def request_handler(request):
     host_config = await resolve_host_config(hostname)
 
     if not host_config:
-        return web.Response(text='Host not found',
-                            content_type='text/plain',
+
+        path = os.path.join(os.path.dirname(__file__),
+                            'templates',
+                            '404-host_not_found.html')
+        async with aiofiles.open(path) as fp:
+            content = await fp.read()
+
+        return web.Response(text=content,
+                            content_type='text/html',
+                            headers=DEFAULT_RESPONSE_HEADERS,
                             status=404)
 
     resource_path = request.match_info.get('resource_path', '')
@@ -216,6 +231,7 @@ async def request_handler(request):
 
     response_headers = filter_headers(
         resource['headers'], PROXY_RESPONSE_HEADERS)
+    response_headers.update(DEFAULT_RESPONSE_HEADERS)
 
     max_age = CACHE_MAX_AGES.get(resource['headers']['Content-Type'])
     response_headers['Cache-Control'] = \

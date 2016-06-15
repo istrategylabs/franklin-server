@@ -223,7 +223,7 @@ async def request_handler(request):
     resource = await fetch_s3(AWS_BUCKET, path, headers=request_headers)
 
     if resource['status'] == 304:
-        return web.Response(status=304)
+        return web.Response(status=304, headers=DEFAULT_RESPONSE_HEADERS)
 
     if resource['status'] != 200:
         resp = await handle_404(host_config)

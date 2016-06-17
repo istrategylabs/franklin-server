@@ -1,4 +1,5 @@
 import mimetypes
+from urllib.parse import urlparse
 
 
 A_YEAR = 60 * 60 * 24 * 365
@@ -39,3 +40,13 @@ def filter_headers(headers, fields):
         if value:
             filtered[field] = value
     return filtered
+
+
+def parse_redis_url(url):
+    u = urlparse(url)
+    params = {
+        'address': (u.hostname, u.port or 6379),
+    }
+    if u.password:
+        params['password'] = u.password
+    return params

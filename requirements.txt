@@ -1,6 +1,7 @@
 aiofiles>=0.3,<0.4
 aiohttp>=0.21,<0.22
+aioredis>=0.2,<0.3
 cachetools==1.1.6
 chardet==2.3.0
-gunicorn==19.5.0
+gunicorn==19.6
 python-decouple==3.0

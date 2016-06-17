@@ -1,5 +1,6 @@
 import datetime
 import hmac
+import json
 import logging
 import os
 from base64 import b64encode
@@ -7,11 +8,11 @@ from urllib.parse import quote, urljoin
 
 import aiofiles
 import aiohttp
+import aioredis
 from aiohttp import web
-from cachetools import TTLCache
 from decouple import config
 
-from util import CACHE_MAX_AGES, filter_headers
+from util import CACHE_MAX_AGES, filter_headers, parse_redis_url
 
 
 __version__ = '2.0.0'
@@ -29,7 +30,7 @@ FRANKLIN_API_URL = config('FRANKLIN_API_URL')
 FRANKLIN_API_KEY = config('FRANKLIN_API_KEY')
 
 HOST_CACHE_TTL = config('HOST_CACHE_TTL', cast=int, default=120)
-HOST_CACHE_SIZE = config('HOST_CACHE_SIZE', cast=int, default=128)
+# HOST_CACHE_SIZE = config('HOST_CACHE_SIZE', cast=int, default=128)
 
 PROXY_REQUEST_HEADERS = ('Cache-Control', 'If-Modified-Since', 'If-None-Match')
 PROXY_RESPONSE_HEADERS = ('Content-Length', 'Last-Modified', 'ETag')
@@ -45,9 +46,6 @@ DEFAULT_RESPONSE_HEADERS = {
 # set up logger
 logger = logging.getLogger('franklin.server')
 
-# set up expiring host cache
-host_cache = TTLCache(maxsize=HOST_CACHE_SIZE, ttl=HOST_CACHE_TTL)
-
 # set up aiohttp client
 session = aiohttp.ClientSession()
 
@@ -56,32 +54,61 @@ session = aiohttp.ClientSession()
 # the code that does stuff
 #
 
-async def resolve_host_config(hostname):
+async def redis_pool(app):
+    pool = app['redis_pool']
+    if pool is None:
+        redis_params = parse_redis_url(config('REDIS_URL'))
+        app['redis_pool'] = pool = await aioredis.create_pool(**redis_params)
+    return pool
+
+
+async def resolve_host_config(app, hostname):
     """ Query Franklin API by hostname for project configuration.
 
         Responses are cached for HOST_CACHE_TTL seconds, retaining at most
         HOST_CACHE_SIZE cache entries.
     """
 
-    if hostname not in host_cache:
+    pool = await redis_pool(app)
+    async with pool.get() as redis_conn:
 
-        config = {}
+        config = await redis_conn.get(hostname)
 
-        url = urljoin(FRANKLIN_API_URL, '/v1/domains/')
-        params = {'domain': hostname}
-        headers = {
-            'Authorization': 'Token {}'.format(FRANKLIN_API_KEY),
-            'User-Agent': 'franklin-server/{}'.format(__version__),
-        }
+        if config:
 
-        async with session.get(url, params=params, headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                config.update(data)
+            config = json.loads(config.decode('utf-8'))
 
-        host_cache[hostname] = config
+        else:
 
-    return host_cache.get(hostname)
+            config = {
+                'path': None,
+                'custom_404': True,
+            }
+
+            url = urljoin(FRANKLIN_API_URL, '/v1/domains/')
+            params = {'domain': hostname}
+            headers = {
+                'Authorization': 'Token {}'.format(FRANKLIN_API_KEY),
+                'User-Agent': 'franklin-server/{}'.format(__version__),
+            }
+
+            async with session.get(
+                    url, params=params, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    config.update(data)
+
+            data = json.dumps(config)
+            redis_conn.set(hostname, data, expire=HOST_CACHE_TTL)
+
+    return config
+
+
+async def update_host_config(app, hostname, config, ttl=HOST_CACHE_TTL):
+    pool = await redis_pool(app)
+    async with pool.get() as redis_conn:
+        data = json.dumps(config)
+        redis_conn.set(hostname, data, expire=ttl)
 
 
 async def generate_signature(bucket, path, amz_date, method='GET'):
@@ -182,9 +209,9 @@ async def request_handler(request):
     """
 
     hostname = request.headers.get('Host')
-    host_config = await resolve_host_config(hostname)
+    host_config = await resolve_host_config(request.app, hostname)
 
-    if not host_config:
+    if not host_config['path']:
 
         path = os.path.join(os.path.dirname(__file__),
                             'templates',
@@ -211,6 +238,7 @@ async def request_handler(request):
 
     if resource['status'] != 200:
         resp = await handle_404(host_config)
+        await update_host_config(request.app, hostname, host_config)
         return resp
 
     response_headers = filter_headers(
@@ -231,4 +259,5 @@ async def request_handler(request):
 #
 
 app = web.Application()
+app['redis_pool'] = None
 app.router.add_route('GET', r'/{resource_path:.*?}', request_handler)
